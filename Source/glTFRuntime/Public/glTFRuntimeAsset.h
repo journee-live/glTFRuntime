@@ -189,6 +189,11 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "glTFRuntime")
 	FString RuntimeContextString;
+	// creates skeletal mesh context
+	TSharedRef<FglTFRuntimeSkeletalMeshContext, ESPMode::ThreadSafe> MakeSkeletalMeshContext(const FglTFRuntimeSkeletalMeshConfig& SkeletalMeshConfig);
+	// identical to LoadSkeletalMeshRecursiveAsync() above but uses provided skeletal mesh context object 
+	void LoadSkeletalMeshRecursiveAsync(const FString& NodeName, const TArray<FString>& ExcludeNodes,
+		FglTFRuntimeSkeletalMeshAsync AsyncCallback, TSharedRef<FglTFRuntimeSkeletalMeshContext, ESPMode::ThreadSafe> SkeletalMeshContext);
 
 protected:
 	TSharedPtr<FglTFRuntimeParser> Parser;

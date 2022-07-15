@@ -929,6 +929,7 @@ USkeletalMesh* FglTFRuntimeParser::CreateSkeletalMeshFromLODs(TSharedRef<FglTFRu
 
 USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTFRuntimeSkeletalMeshContext, ESPMode::ThreadSafe> SkeletalMeshContext)
 {
+	SCOPED_NAMED_EVENT(FglTFRuntimeParser_FinalizeSkeletalMeshWithLODs, FColor::Cyan);
 
 #if !WITH_EDITOR
 	bool bHasMorphTargets = false;
@@ -937,6 +938,8 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 
 	for (int32 LODIndex = 0; LODIndex < SkeletalMeshContext->LODs.Num(); LODIndex++)
 	{
+		SCOPED_NAMED_EVENT(FglTFRuntimeParser_TuneLOD, FColor::Cyan);
+
 #if WITH_EDITOR
 		SkeletalMeshContext->SkeletalMesh->SaveLODImportedData(LODIndex, SkeletalMeshContext->LODs[LODIndex].ImportData);
 #endif
@@ -955,7 +958,7 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 		{
 			LODInfo.ScreenSize = SkeletalMeshContext->SkeletalMeshConfig.LODScreenSize[LODIndex];
 		}
-
+		// Journee edits: disable morph targets for packaged builds
 #if !WITH_EDITOR
 		int32 BaseIndex = 0;
 		TMap<FString, UMorphTarget*> MorphTargetNamesHistory;
@@ -963,11 +966,13 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 
 		for (int32 PrimitiveIndex = 0; PrimitiveIndex < SkeletalMeshContext->LODs[LODIndex].Primitives.Num(); PrimitiveIndex++)
 		{
+			SCOPED_NAMED_EVENT(FglTFRuntimeParser_RegisterMorphTargetLOD, FColor::Cyan);
 			FglTFRuntimePrimitive& Primitive = SkeletalMeshContext->LODs[LODIndex].Primitives[PrimitiveIndex];
 
 			for (FglTFRuntimeMorphTarget& MorphTargetData : Primitive.MorphTargets)
 			{
 				bool bSkip = true;
+				SCOPED_NAMED_EVENT(FglTFRuntimeParser_MorphTargetLODModelSetupLOD, FColor::Cyan);
 				FMorphTargetLODModel MorphTargetLODModel;
 				MorphTargetLODModel.NumBaseMeshVerts = Primitive.Indices.Num();
 				MorphTargetLODModel.SectionIndices.Add(PrimitiveIndex);
@@ -1086,7 +1091,7 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 
 		for (int32 MatIndex = 0; MatIndex < SkeletalMeshContext->LODs[LODIndex].Primitives.Num(); MatIndex++)
 		{
-			LODInfo.LODMaterialMap.Add(MatIndex);
+			SCOPED_NAMED_EVENT(FglTFRuntimeParser_SkeletalMaterialSetupLOD, FColor::Cyan);
 
 #if ENGINE_MAJOR_VERSION > 4 || ENGINE_MINOR_VERSION >= 27
 			TArray<FSkeletalMaterial>& SkeletalMaterials = SkeletalMeshContext->SkeletalMesh->GetMaterials();
@@ -1097,6 +1102,7 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 			SkeletalMaterials[NewMatIndex].UVChannelData.bInitialized = true;
 			SkeletalMaterials[NewMatIndex].MaterialSlotName = FName(FString::Printf(TEXT("LOD_%d_Section_%d_%s"), LODIndex, MatIndex, *(SkeletalMeshContext->LODs[LODIndex].Primitives[MatIndex].MaterialName)));
 		}
+			SCOPED_NAMED_EVENT(FglTFRuntimeParser_BuildSkeletalMeshLOD, FColor::Cyan);
 #if WITH_EDITOR
 		IMeshBuilderModule& MeshBuilderModule = IMeshBuilderModule::GetForRunningPlatform();
 #if ENGINE_MAJOR_VERSION > 4 || ENGINE_MINOR_VERSION >= 27
@@ -1112,10 +1118,14 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 	}
 
 #if WITH_EDITOR
-	SkeletalMeshContext->SkeletalMesh->Build();
+	{
+		SCOPED_NAMED_EVENT(FglTFRuntimeParser_SkeletalMeshBuild, FColor::Cyan);
+		SkeletalMeshContext->SkeletalMesh->Build();
+	}
 #else
 	if (bHasMorphTargets)
 	{
+		SCOPED_NAMED_EVENT(FglTFRuntimeParser_InitMorphTargets, FColor::Cyan);
 		SkeletalMeshContext->SkeletalMesh->InitMorphTargets();
 	}
 #endif
@@ -1155,6 +1165,7 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 #if ENGINE_MAJOR_VERSION > 4 || ENGINE_MINOR_VERSION > 26
 		SkeletalMeshContext->SkeletalMesh->SetSkeleton(SkeletalMeshContext->SkeletalMeshConfig.Skeleton);
 #else
+		SCOPED_NAMED_EVENT(FglTFRuntimeParser_FinalizeSkeletalMeshWithLODs_Config, FColor::Cyan);
 		SkeletalMeshContext->SkeletalMesh->Skeleton = SkeletalMeshContext->SkeletalMeshConfig.Skeleton;
 #endif
 		if (SkeletalMeshContext->SkeletalMeshConfig.bMergeAllBonesToBoneTree)
@@ -1162,17 +1173,20 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 #if ENGINE_MAJOR_VERSION > 4 || ENGINE_MINOR_VERSION > 26
 			SkeletalMeshContext->SkeletalMesh->GetSkeleton()->MergeAllBonesToBoneTree(SkeletalMeshContext->SkeletalMesh);
 #else
+			SCOPED_NAMED_EVENT(FglTFRuntimeParser_MergeAllBonesToBoneTree, FColor::Cyan);
 			SkeletalMeshContext->SkeletalMesh->Skeleton->MergeAllBonesToBoneTree(SkeletalMeshContext->SkeletalMesh);
 #endif
 		}
 	}
 	else
 	{
+		SCOPED_NAMED_EVENT(FglTFRuntimeParser_NewSkeletonSetup, FColor::Cyan);
 		if (CanReadFromCache(SkeletalMeshContext->SkeletalMeshConfig.SkeletonConfig.CacheMode) && SkeletonsCache.Contains(SkeletalMeshContext->SkinIndex))
 		{
 #if ENGINE_MAJOR_VERSION > 4 || ENGINE_MINOR_VERSION > 26
 			SkeletalMeshContext->SkeletalMesh->SetSkeleton(SkeletonsCache[SkeletalMeshContext->SkinIndex]);
 #else
+			SCOPED_NAMED_EVENT(FglTFRuntimeParser_SkeletonCacheRead, FColor::Cyan);
 			SkeletalMeshContext->SkeletalMesh->Skeleton = SkeletonsCache[SkeletalMeshContext->SkinIndex];
 #endif
 		}
@@ -1182,6 +1196,7 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 			SkeletalMeshContext->SkeletalMesh->SetSkeleton(NewObject<USkeleton>(GetTransientPackage(), NAME_None, RF_Public));
 			SkeletalMeshContext->SkeletalMesh->GetSkeleton()->MergeAllBonesToBoneTree(SkeletalMeshContext->SkeletalMesh);
 #else
+			SCOPED_NAMED_EVENT(FglTFRuntimeParser_SkeletonCreate, FColor::Cyan);
 			SkeletalMeshContext->SkeletalMesh->Skeleton = NewObject<USkeleton>(GetTransientPackage(), NAME_None, RF_Public);
 			SkeletalMeshContext->SkeletalMesh->Skeleton->MergeAllBonesToBoneTree(SkeletalMeshContext->SkeletalMesh);
 #endif
@@ -1223,6 +1238,7 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 
 	if (SkeletalMeshContext->SkeletalMeshConfig.PhysicsBodies.Num() > 0 || SkeletalMeshContext->SkeletalMeshConfig.PhysicsAssetTemplate)
 	{
+		SCOPED_NAMED_EVENT(FglTFRuntimeParser_FinalizeSkeletalMeshWithLODs_PhysicsBodies, FColor::Cyan);
 		UPhysicsAsset* PhysicsAsset = NewObject<UPhysicsAsset>(SkeletalMeshContext->SkeletalMesh, NAME_None, RF_Public);
 		if (PhysicsAsset)
 		{
@@ -1292,18 +1308,24 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 		}
 	}
 
+	{
+		SCOPED_NAMED_EVENT(FglTFRuntimeParser_FinalizeSkeletalMeshWithLODs_SkeletalMeshPostLoad, FColor::Cyan);
 #if !WITH_EDITOR
 	SkeletalMeshContext->SkeletalMesh->PostLoad();
 #endif
+	}
 
 	if (OnSkeletalMeshCreated.IsBound())
 	{
+		SCOPED_NAMED_EVENT(FglTFRuntimeParser_FinalizeSkeletalMeshWithLODs_OnSkeletalMeshCreated, FColor::Cyan);
 		OnSkeletalMeshCreated.Broadcast(SkeletalMeshContext->SkeletalMesh);
 	}
 
 #if WITH_EDITOR
 	if (!SkeletalMeshContext->SkeletalMeshConfig.SaveToPackage.IsEmpty())
 	{
+		SCOPED_NAMED_EVENT(FglTFRuntimeParser_FinalizeSkeletalMeshWithLODs_SavePackage, FColor::Cyan);
+
 		UPackage* Package = Cast<UPackage>(SkeletalMeshContext->SkeletalMesh->GetOuter());
 		if (Package && Package != GetTransientPackage())
 		{
@@ -1327,6 +1349,7 @@ USkeletalMesh* FglTFRuntimeParser::FinalizeSkeletalMeshWithLODs(TSharedRef<FglTF
 
 USkeletalMesh* FglTFRuntimeParser::LoadSkeletalMesh(const int32 MeshIndex, const int32 SkinIndex, const FglTFRuntimeSkeletalMeshConfig & SkeletalMeshConfig)
 {
+	SCOPED_NAMED_EVENT(FglTFRuntimeParser_LoadSkeletalMesh, FColor::Cyan);
 
 	// first check cache
 	if (CanReadFromCache(SkeletalMeshConfig.CacheMode) && SkeletalMeshesCache.Contains(MeshIndex))
@@ -1403,6 +1426,8 @@ void FglTFRuntimeParser::LoadSkeletalMeshAsync(const int32 MeshIndex, const int3
 
 USkeletalMesh* FglTFRuntimeParser::LoadSkeletalMeshLODs(const TArray<int32> MeshIndices, const int32 SkinIndex, const FglTFRuntimeSkeletalMeshConfig & SkeletalMeshConfig)
 {
+	SCOPED_NAMED_EVENT(FglTFRuntimeParser_LoadSkeletalMeshLODs, FColor::Cyan);
+
 	TArray<FglTFRuntimeLOD> LODs;
 
 	for (const int32 MeshIndex : MeshIndices)
@@ -1437,6 +1462,8 @@ USkeletalMesh* FglTFRuntimeParser::LoadSkeletalMeshLODs(const TArray<int32> Mesh
 
 USkeletalMesh* FglTFRuntimeParser::LoadSkeletalMeshRecursive(const FString & NodeName, const int32 SkinIndex, const TArray<FString>&ExcludeNodes, const FglTFRuntimeSkeletalMeshConfig & SkeletalMeshConfig)
 {
+	SCOPED_NAMED_EVENT(FglTFRuntimeParser_LoadSkeletalMeshRecursive, FColor::Cyan);
+
 	FglTFRuntimeNode Node;
 	TArray<FglTFRuntimeNode> Nodes;
 
@@ -1706,6 +1733,8 @@ void FglTFRuntimeParser::LoadSkeletalMeshRecursiveAsync(const FString & NodeName
 
 UAnimSequence* FglTFRuntimeParser::LoadSkeletalAnimationByName(USkeletalMesh * SkeletalMesh, const FString AnimationName, const FglTFRuntimeSkeletalAnimationConfig & SkeletalAnimationConfig)
 {
+	SCOPED_NAMED_EVENT(FglTFRuntimeParser_LoadSkeletalAnimationByName, FColor::Cyan);
+
 	if (!SkeletalMesh)
 	{
 		return nullptr;
@@ -1741,6 +1770,7 @@ UAnimSequence* FglTFRuntimeParser::LoadSkeletalAnimationByName(USkeletalMesh * S
 
 UAnimSequence* FglTFRuntimeParser::LoadNodeSkeletalAnimation(USkeletalMesh * SkeletalMesh, const int32 NodeIndex, const FglTFRuntimeSkeletalAnimationConfig & SkeletalAnimationConfig)
 {
+	SCOPED_NAMED_EVENT(FglTFRuntimeParser_LoadNodeSkeletalAnimation, FColor::Cyan);
 
 	if (!SkeletalMesh)
 	{
@@ -1826,6 +1856,8 @@ UAnimSequence* FglTFRuntimeParser::LoadNodeSkeletalAnimation(USkeletalMesh * Ske
 
 UAnimSequence* FglTFRuntimeParser::LoadSkeletalAnimation(USkeletalMesh * SkeletalMesh, const int32 AnimationIndex, const FglTFRuntimeSkeletalAnimationConfig & SkeletalAnimationConfig)
 {
+	SCOPED_NAMED_EVENT(FglTFRuntimeParser_LoadSkeletalAnimation, FColor::Cyan);
+
 	if (!SkeletalMesh)
 	{
 		return nullptr;
@@ -2149,6 +2181,8 @@ UAnimSequence* FglTFRuntimeParser::LoadSkeletalAnimation(USkeletalMesh * Skeleta
 
 bool FglTFRuntimeParser::LoadSkeletalAnimation_Internal(TSharedRef<FJsonObject> JsonAnimationObject, TMap<FString, FRawAnimSequenceTrack>&Tracks, TMap<FName, TArray<TPair<float, float>>>&MorphTargetCurves, float& Duration, const FglTFRuntimeSkeletalAnimationConfig & SkeletalAnimationConfig, TFunctionRef<bool(const FglTFRuntimeNode& Node)> Filter)
 {
+
+	SCOPED_NAMED_EVENT(FglTFRuntimeParser_LoadSkeletalAnimation_Internal, FColor::Cyan);
 
 	auto Callback = [&](const FglTFRuntimeNode& Node, const FString& Path, const TArray<float> Timeline, const TArray<FVector4> Values)
 	{

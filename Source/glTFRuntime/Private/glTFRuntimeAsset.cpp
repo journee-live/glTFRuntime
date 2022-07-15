@@ -298,6 +298,21 @@ USkeletalMesh* UglTFRuntimeAsset::LoadSkeletalMeshRecursive(const FString& NodeN
 	return Parser->LoadSkeletalMeshRecursive(NodeName, SkeletalMeshConfig.OverrideSkinIndex, ExcludeNodes, SkeletalMeshConfig);
 }
 
+TSharedRef<FglTFRuntimeSkeletalMeshContext, ESPMode::ThreadSafe> UglTFRuntimeAsset::MakeSkeletalMeshContext(const FglTFRuntimeSkeletalMeshConfig& SkeletalMeshConfig)
+{
+	return MakeShared<FglTFRuntimeSkeletalMeshContext, ESPMode::ThreadSafe>(
+			Parser->AsShared(),
+			SkeletalMeshConfig);
+}
+
+void UglTFRuntimeAsset::LoadSkeletalMeshRecursiveAsync(const FString& NodeName, const TArray<FString>& ExcludeNodes,
+	FglTFRuntimeSkeletalMeshAsync AsyncCallback, TSharedRef<FglTFRuntimeSkeletalMeshContext, ESPMode::ThreadSafe> SkeletalMeshContext)
+{
+	GLTF_CHECK_PARSER_VOID();
+
+	Parser->LoadSkeletalMeshRecursiveAsync(SkeletalMeshContext, NodeName, SkeletalMeshContext->SkeletalMeshConfig.OverrideSkinIndex, ExcludeNodes, AsyncCallback, SkeletalMeshContext->SkeletalMeshConfig);
+}
+
 void UglTFRuntimeAsset::LoadSkeletalMeshRecursiveAsync(const FString& NodeName, const TArray<FString>& ExcludeNodes, FglTFRuntimeSkeletalMeshAsync AsyncCallback, const FglTFRuntimeSkeletalMeshConfig& SkeletalMeshConfig)
 {
 	GLTF_CHECK_PARSER_VOID();
