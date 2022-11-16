@@ -2,6 +2,8 @@
 
 
 #include "glTFRuntimeAssetActor.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "Components/LightComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Animation/AnimSequence.h"
@@ -16,6 +18,10 @@ AglTFRuntimeAssetActor::AglTFRuntimeAssetActor()
 	RootComponent = AssetRoot;
 	bAllowNodeAnimations = true;
 	bStaticMeshesAsSkeletal = false;
+	bAllowSkeletalAnimations = true;
+	bAllowPoseAnimations = true;
+	bAllowCameras = true;
+	bAllowLights = true;
 }
 
 // Called when the game starts or when spawned
@@ -83,7 +89,7 @@ void AglTFRuntimeAssetActor::ProcessNode(USceneComponent* NodeParentComponent, c
 	}
 
 	USceneComponent* NewComponent = nullptr;
-	if (Node.CameraIndex != INDEX_NONE)
+	if (bAllowCameras && Node.CameraIndex != INDEX_NONE)
 	{
 		UCameraComponent* NewCameraComponent = NewObject<UCameraComponent>(this, GetSafeNodeName<UCameraComponent>(Node));
 		NewCameraComponent->SetupAttachment(NodeParentComponent);
@@ -106,7 +112,21 @@ void AglTFRuntimeAssetActor::ProcessNode(USceneComponent* NodeParentComponent, c
 	{
 		if (Node.SkinIndex < 0 && !bStaticMeshesAsSkeletal)
 		{
-			UStaticMeshComponent* StaticMeshComponent = NewObject<UStaticMeshComponent>(this, GetSafeNodeName<UStaticMeshComponent>(Node));
+			UStaticMeshComponent* StaticMeshComponent = nullptr;
+			TArray<FTransform> GPUInstancingTransforms;
+			if (Asset->GetNodeGPUInstancingTransforms(Node.Index, GPUInstancingTransforms))
+			{
+				UInstancedStaticMeshComponent* InstancedStaticMeshComponent = NewObject<UInstancedStaticMeshComponent>(this, GetSafeNodeName<UInstancedStaticMeshComponent>(Node));
+				for (const FTransform& GPUInstanceTransform : GPUInstancingTransforms)
+				{
+					InstancedStaticMeshComponent->AddInstance(GPUInstanceTransform);
+				}
+				StaticMeshComponent = InstancedStaticMeshComponent;
+			}
+			else
+			{
+				StaticMeshComponent = NewObject<UStaticMeshComponent>(this, GetSafeNodeName<UStaticMeshComponent>(Node));
+			}
 			StaticMeshComponent->SetupAttachment(NodeParentComponent);
 			StaticMeshComponent->RegisterComponent();
 			StaticMeshComponent->SetRelativeTransform(Node.Transform);
@@ -139,6 +159,10 @@ void AglTFRuntimeAssetActor::ProcessNode(USceneComponent* NodeParentComponent, c
 			SkeletalMeshComponent->RegisterComponent();
 			SkeletalMeshComponent->SetRelativeTransform(Node.Transform);
 			AddInstanceComponent(SkeletalMeshComponent);
+			if (SkeletalMeshConfig.Outer == nullptr)
+			{
+				SkeletalMeshConfig.Outer = SkeletalMeshComponent;
+			}
 			USkeletalMesh* SkeletalMesh = Asset->LoadSkeletalMesh(Node.MeshIndex, Node.SkinIndex, SkeletalMeshConfig);
 			SkeletalMeshComponent->SetSkeletalMesh(SkeletalMesh);
 			DiscoveredSkeletalMeshComponents.Add(SkeletalMeshComponent);
@@ -162,19 +186,40 @@ void AglTFRuntimeAssetActor::ProcessNode(USceneComponent* NodeParentComponent, c
 		}
 	}
 
-	// check for audio emitters
-	for (const int32 EmitterIndex : Node.EmitterIndices)
+
+	TArray<int32> EmitterIndices;
+	if (Asset->GetNodeExtensionIndices(Node.Index, "MSFT_audio_emitter", "emitters", EmitterIndices))
 	{
-		FglTFRuntimeAudioEmitter AudioEmitter;
-		if (Asset->LoadAudioEmitter(EmitterIndex, AudioEmitter))
+		// check for audio emitters
+		for (const int32 EmitterIndex : EmitterIndices)
 		{
-			UAudioComponent* AudioComponent = NewObject<UAudioComponent>(this, *AudioEmitter.Name);
-			AudioComponent->SetupAttachment(NewComponent);
-			AudioComponent->RegisterComponent();
-			AudioComponent->SetRelativeTransform(Node.Transform);
-			AddInstanceComponent(AudioComponent);
-			Asset->LoadEmitterIntoAudioComponent(AudioEmitter, AudioComponent);
-			AudioComponent->Play();
+			FglTFRuntimeAudioEmitter AudioEmitter;
+			if (Asset->LoadAudioEmitter(EmitterIndex, AudioEmitter))
+			{
+				UAudioComponent* AudioComponent = NewObject<UAudioComponent>(this, *AudioEmitter.Name);
+				AudioComponent->SetupAttachment(NewComponent);
+				AudioComponent->RegisterComponent();
+				AudioComponent->SetRelativeTransform(Node.Transform);
+				AddInstanceComponent(AudioComponent);
+				Asset->LoadEmitterIntoAudioComponent(AudioEmitter, AudioComponent);
+				AudioComponent->Play();
+			}
+		}
+	}
+
+	if (bAllowLights)
+	{
+		int32 LightIndex;
+		if (Asset->GetNodeExtensionIndex(Node.Index, "KHR_lights_punctual", "light", LightIndex))
+		{
+			ULightComponent* LightComponent = Asset->LoadPunctualLight(LightIndex, this, LightConfig);
+			if (LightComponent)
+			{
+				LightComponent->SetupAttachment(NewComponent);
+				LightComponent->RegisterComponent();
+				LightComponent->SetRelativeTransform(FTransform::Identity);
+				AddInstanceComponent(LightComponent);
+			}
 		}
 	}
 
@@ -201,14 +246,28 @@ void AglTFRuntimeAssetActor::ProcessNode(USceneComponent* NodeParentComponent, c
 	else
 	{
 		USkeletalMeshComponent* SkeletalMeshComponent = Cast<USkeletalMeshComponent>(NewComponent);
-		FglTFRuntimeSkeletalAnimationConfig SkeletalAnimationConfig;
-		UAnimSequence* SkeletalAnimation = Asset->LoadNodeSkeletalAnimation(SkeletalMeshComponent->SkeletalMesh, Node.Index, SkeletalAnimationConfig);
-		if (SkeletalAnimation)
+		if (bAllowSkeletalAnimations)
 		{
-			SkeletalMeshComponent->AnimationData.AnimToPlay = SkeletalAnimation;
-			SkeletalMeshComponent->AnimationData.bSavedLooping = true;
-			SkeletalMeshComponent->AnimationData.bSavedPlaying = true;
-			SkeletalMeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION > 0
+			UAnimSequence* SkeletalAnimation = Asset->LoadNodeSkeletalAnimation(SkeletalMeshComponent->GetSkeletalMeshAsset(), Node.Index, SkeletalAnimationConfig);
+			if (!SkeletalAnimation && bAllowPoseAnimations)
+			{
+				SkeletalAnimation = Asset->CreateAnimationFromPose(SkeletalMeshComponent->GetSkeletalMeshAsset(), SkeletalAnimationConfig, Node.SkinIndex);
+			}
+#else
+			UAnimSequence* SkeletalAnimation = Asset->LoadNodeSkeletalAnimation(SkeletalMeshComponent->SkeletalMesh, Node.Index, SkeletalAnimationConfig);
+			if (!SkeletalAnimation && bAllowPoseAnimations)
+			{
+				SkeletalAnimation = Asset->CreateAnimationFromPose(SkeletalMeshComponent->SkeletalMesh, SkeletalAnimationConfig, Node.SkinIndex);
+			}
+#endif
+			if (SkeletalAnimation)
+			{
+				SkeletalMeshComponent->AnimationData.AnimToPlay = SkeletalAnimation;
+				SkeletalMeshComponent->AnimationData.bSavedLooping = true;
+				SkeletalMeshComponent->AnimationData.bSavedPlaying = true;
+				SkeletalMeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+			}
 		}
 	}
 
