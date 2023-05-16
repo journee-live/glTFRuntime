@@ -8,6 +8,7 @@
 #include "Misc/Base64.h"
 #include "Misc/Compression.h"
 #include "Interfaces/IPluginManager.h"
+#include "MaterialDomain.h"
 
 DEFINE_LOG_CATEGORY(LogGLTFRuntime);
 

@@ -11,6 +11,7 @@
 #include "Components/AudioComponent.h"
 #include "glTFRuntimeAnimationCurve.h"
 #include "ProceduralMeshComponent.h"
+#include "Engine/Texture.h"
 #if WITH_EDITOR
 #include "Rendering/SkeletalMeshLODImporterData.h"
 #endif
